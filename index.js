@@ -1,63 +1,85 @@
-const { Telegraf } = require('telegraf');
-const http = require('http'); // مكتبة لعمل سيرفر وهمي
+const TelegramBot = require('node-telegram-bot-api');
+const express = require('express');
+const axios = require('axios'); // مكتبة لجلب البيانات من الروابط
 
-// 🔴🔴 ضع مفاتيحك هنا بدقة 🔴🔴
-const BOT_TOKEN = '8385456969:AAHCKiGu-J3ts5ihKtHwsP0UdN9b79R2jJY';
-const GEMINI_API_KEY = 'AIzaSyBHy7Q4xHz310zjSP7u7V0VZoDo8J86mxA';
+// 1. ضع التوكن الخاص بك هنا
+const token = 'YOUR_BOT_TOKEN_HERE';
+const bot = new TelegramBot(token, {polling: true});
 
-// 🎭 شخصية البوت (الهاكر العراقي)
-const PERSONA = `
-أنت خبير أمن سيبراني ومبرمج محترف (Hacker) من العراق.
-تتحدث باللهجة العراقية الدارجة.
-أسلوبك ذكي، غامض، وتستخدم مصطلحات تقنية (Server, Exploit, Bug).
-تستخدم الإيموجيز: 💻, 💀, 🛡️.
-`;
+// --- كود السيرفر (لإبقاء البوت شغال 24 ساعة) ---
+const app = express();
+const port = 3000;
 
-const bot = new Telegraf(BOT_TOKEN);
-
-bot.start((ctx) => {
-    ctx.reply('تم الاتصال بالسيرفر السحابي.. البوت يعمل 24/7 ☁️💀');
+app.get('/', (req, res) => {
+  res.send('Bot is Alive! 🟢');
 });
 
-bot.on('text', async (ctx) => {
-    try {
-        ctx.sendChatAction('typing');
+app.listen(port, () => {
+  console.log(`Server running at http://localhost:${port}`);
+});
 
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
-
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ 
-                    parts: [{ text: PERSONA + "\n\nالمستخدم: " + ctx.message.text }] 
-                }]
-            })
-        });
-
-        const data = await response.json();
-
-        if (data.candidates && data.candidates[0].content) {
-            await ctx.reply(data.candidates[0].content.parts[0].text);
-        } else {
-            console.log('No response');
-        }
-
-    } catch (error) {
-        console.error('Error:', error);
+// --- القائمة الرئيسية (الأزرار) ---
+bot.onText(/\/start/, (msg) => {
+  const chatId = msg.chat.id;
+  
+  const opts = {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '🔍 فحص IP', callback_data: 'ip_tool' },
+          { text: '🆔 كشف الآيدي', callback_data: 'id_tool' }
+        ],
+        [
+          { text: '👨‍💻 المطور', url: 'https://t.me/YOUR_USER' }
+        ]
+      ]
     }
+  };
+
+  bot.sendMessage(chatId, '👋 *أهلاً بك في بوت الأدوات (JS Edition)*\n\nاختر أداة من الأسفل:', { parse_mode: 'Markdown', ...opts });
 });
 
-// ⚡️ خدعة السيرفر: نفتح بورت وهمي عشان Render ما يطفي البوت
-const server = http.createServer((req, res) => {
-    res.writeHead(200);
-    res.end('Bot is alive!');
+// --- برمجة الأزرار ---
+bot.on('callback_query', async (callbackQuery) => {
+  const message = callbackQuery.message;
+  const chatId = message.chat.id;
+  const data = callbackQuery.data;
+
+  // أداة كشف الآيدي
+  if (data === 'id_tool') {
+    bot.sendMessage(chatId, `🆔 الآيدي الخاص بك هو: \`${callbackQuery.from.id}\``, { parse_mode: 'Markdown' });
+  }
+
+  // أداة فحص IP (تطلب من المستخدم إرسال IP)
+  if (data === 'ip_tool') {
+    bot.sendMessage(chatId, 'ارسل الـ IP أو الرابط الذي تريد فحصه الآن:');
+    
+    // انتظار الرد القادم (Listener)
+    bot.once('message', async (msg) => {
+      if (msg.text.includes('.')) { // تحقق بسيط
+        bot.sendMessage(chatId, '⏳ جاري الفحص...');
+        try {
+          // جلب المعلومات من API
+          const response = await axios.get(`http://ip-api.com/json/${msg.text}`);
+          const info = response.data;
+          
+          if (info.status === 'success') {
+            const report = `
+✅ *تم الفحص بنجاح*
+
+🌍 الدولة: ${info.country}
+🏙 المدينة: ${info.city}
+📡 الشبكة: ${info.isp}
+📍 الاحداثيات: ${info.lat}, ${info.lon}
+            `;
+            bot.sendMessage(chatId, report, { parse_mode: 'Markdown' });
+          } else {
+            bot.sendMessage(chatId, '❌ الـ IP غير صحيح.');
+          }
+        } catch (error) {
+          bot.sendMessage(chatId, 'حدث خطأ في الاتصال بالسيرفر.');
+        }
+      }
+    });
+  }
 });
-server.listen(process.env.PORT || 3000);
-
-// تشغيل البوت
-bot.launch();
-console.log('Cloud Bot Started...');
-
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
